@@ -291,9 +291,11 @@ build_libplacebo() {
 build_ffmpeg() {
     fetch_pkg ffmpeg
 
-    # --disable-everything plus explicit whitelists. Anything voicefox can actually
-    # open has to appear below; verify/ drives a wine playback matrix that fails loudly
-    # when something is missing, which is the only reliable way to converge these lists.
+    # --disable-everything plus explicit whitelists. This is the one place tied to
+    # what a downstream consumer actually opens: every format it can encounter has to
+    # appear below, or it fails at runtime with a perfectly green build behind it.
+    # verify/ drives a wine playback matrix that fails loudly when an entry is
+    # missing, which is the only reliable way to converge these lists.
     local demuxers=(
         aac ac3 aiff ape asf au caf dsf dts eac3 flac hls image2 matroska mov mp3
         mpc mpc8 mpegts ogg rm spdif tak truehd tta voc w64 wav wv xwma
@@ -432,8 +434,9 @@ do_package() {
     install -Dm755 "$dll" "$out/libmpv-2.dll"
     "$TARGET-strip" --strip-unneeded "$out/libmpv-2.dll"
 
-    # voicefox consumes the same layout as shinchiro's mpv-dev packages, so the
-    # import library has to keep that exact name even if meson picks another.
+    # The archive mirrors shinchiro's mpv-dev layout so that a downstream already
+    # unpacking those needs no change beyond the URL. That means the import library
+    # has to keep that exact name even if meson picks another.
     local implib=$PREFIX/lib/libmpv.dll.a
     [ -f "$implib" ] || implib=$(find "$PREFIX/lib" -name 'libmpv*.dll.a' -print -quit)
     [ -n "$implib" ] && [ -f "$implib" ] || die "no libmpv import library found under $PREFIX/lib"

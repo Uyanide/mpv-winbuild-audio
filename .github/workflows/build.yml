@@ -85,7 +85,7 @@ jobs:
 
   bump:
     # Only ever opens a PR. Releases stay a deliberate, human-tagged act, so an
-    # upstream release can never silently change what voicefox downloads.
+    # upstream release can never silently change what downstream downloads.
     if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     permissions:

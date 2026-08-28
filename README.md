@@ -55,9 +55,30 @@ Removing things is the point, so it is worth being explicit:
 - **No SMTC** (Windows media transport controls) — it needs C++/WinRT.
 - **No OpenSSL or GnuTLS.** HTTPS goes through Schannel, i.e. the Windows system
   TLS stack. This is what keeps the dependency list short.
+- **No screenshots and no stream recording.** Every encoder and muxer is off, and
+  mpv's `screenshot` (`avcodec_find_encoder`) and `--stream-record` /
+  `--dump-cache` (`av_guess_format`) each look one up at runtime. They build fine
+  and fail when called.
 - **Audio formats are a whitelist**, not everything FFmpeg can do. See
   `build_ffmpeg` in [`build.sh`](build.sh). Adding a format means adding its
   demuxer, decoder and parser, and a fixture in [`verify/fixtures.sh`](verify/fixtures.sh).
+
+### What is tuned to the consumer
+
+Nearly everything above is off because the DLL has no video path at all, which is
+true regardless of who uses it. Four decisions are different — they follow from
+what a particular downstream actually does, and are the ones to revisit before
+reusing this build elsewhere:
+
+| decision | where | revisit if downstream… |
+| --- | --- | --- |
+| the FFmpeg format whitelist | `build_ffmpeg` in `build.sh`, plus a fixture in `verify/fixtures.sh` | opens a container or codec not on the list |
+| no encoders, no muxers | `--disable-encoders`, `--disable-muxers` | needs `screenshot`, `--stream-record` or `--dump-cache` |
+| no SMTC | `-Dwin32-smtc=disabled` | wants Windows media-key and now-playing integration (it needs C++/WinRT) |
+| no Lua or JavaScript | `-Dlua=disabled -Djavascript=disabled` | loads mpv scripts |
+
+The archive layout in `do_package` is the other consumer-facing choice, but it only
+mirrors the `mpv-dev` packages, so matching it costs nothing.
 
 ## Using it
 

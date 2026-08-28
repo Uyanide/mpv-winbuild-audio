@@ -3,9 +3,9 @@
 # Assert that the produced libmpv-2.dll is the thing we meant to produce.
 #
 # This file is the reason the repository exists. The Vulkan dependency that broke
-# voicefox's Windows CI was not a build failure -- it was a perfectly green build
-# whose output could not be loaded on a machine without a GPU driver. Nothing but
-# an explicit check on the artifact catches that class of bug.
+# downstream CI was not a build failure -- it was a perfectly green build whose
+# output could not be loaded on a machine without a GPU driver. Nothing but an
+# explicit check on the artifact catches that class of bug.
 #
 #   ./verify/verify.sh                 verify dist/<latest>/libmpv-2.dll
 #   ./verify/verify.sh path/to/dll     verify a specific DLL
