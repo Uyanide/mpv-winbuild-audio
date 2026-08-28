@@ -20,7 +20,7 @@ So this repository builds the smallest thing that still is libmpv:
 | | shinchiro `mpv-dev` | this |
 | --- | --- | --- |
 | `vulkan-1.dll` import | yes | no |
-| size | ~120 MB | see the release |
+| `libmpv-2.dll` | ~120 MB | ~14 MB (4.2 MB packed) |
 | licence | GPL | LGPL-2.1-or-later |
 | pinned | "latest" via a SourceForge RSS feed, no checksum | tag + sha256 |
 | video | full | none |
@@ -48,8 +48,9 @@ Removing things is the point, so it is worth being explicit:
 
 - **No video.** No video decoders, no VO, no GPU backend of any kind.
 - **No subtitle font resolution.** libass is built with no font provider at all
-  (no fontconfig, no DirectWrite), because DirectWrite would put `dwrite.dll` in
-  the import table. libass is still linked — mpv requires it unconditionally.
+  (no fontconfig, no DirectWrite). Resolving font names is only useful if you are
+  rendering subtitles, which this build never does. libass itself is still linked —
+  mpv requires it unconditionally.
 - **No Lua, no JavaScript, no libarchive, no libbluray, no cdda/dvd.**
 - **No SMTC** (Windows media transport controls) — it needs C++/WinRT.
 - **No OpenSSL or GnuTLS.** HTTPS goes through Schannel, i.e. the Windows system
@@ -96,8 +97,17 @@ only host requirements are `docker` and `git`.
 `docker/packages.txt` is the single source of truth for the package list, used by
 both `docker/Dockerfile` and the workflow, so the two environments cannot drift.
 
-A cold build is roughly 25–45 minutes; ccache (persisted in `build/ccache`) makes
-repeat builds much faster.
+FFmpeg and mpv dominate the wall time on a cold build. ccache is persisted in
+`build/ccache`, so re-running after a change to one package takes a few minutes.
+
+### Reproducible
+
+Two builds of the same commit produce a byte-identical `.7z`. The PE header
+timestamp is zeroed (`-Wl,--no-insert-timestamp`), `strip` is pinned with
+`SOURCE_DATE_EPOCH` — binutils otherwise re-stamps the header while rewriting the
+file — the archive stores no mtimes, and `BUILDINFO.txt` records the commit date
+rather than the build clock. So `SHA256SUMS` on a release is a claim anyone can
+check by rebuilding the tag.
 
 ### How the pieces fit
 
@@ -182,9 +192,9 @@ The build scripts in this repository are MIT ([`LICENSE`](LICENSE)).
 
 The **produced `libmpv-2.dll` is a combined work under LGPL-2.1-or-later.** mpv
 is built with `-Dgpl=false` and FFmpeg without `--enable-gpl` or
-`--enable-nonfree`. The gpl-gated mpv features are `cdda`, `dvbin`, `dvda`,
-`dvdnav`, `jack`, `oss-audio`, `caca`, `direct3d` and `x11` — none of which exist
-on a Windows audio path, so LGPL costs nothing here.
+`--enable-nonfree`. In mpv 0.41.0 the only features gated on `gpl` are `cdda`,
+`dvbin`, `dvdnav`, `jack`, `oss-audio`, `caca`, `direct3d` and `x11` — none of
+which exist on a Windows audio path, so LGPL costs nothing here.
 
 Statically linked into that DLL:
 

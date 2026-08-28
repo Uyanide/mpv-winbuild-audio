@@ -3,6 +3,9 @@ name: build
 on:
   push:
     tags: ['v*']
+  # So that the monthly bump PR is actually built and verified before anyone
+  # merges it -- an upstream bump that does not build is the whole thing to catch.
+  pull_request:
   schedule:
     # First of the month. This is both an upstream check and a bit-rot check: the
     # build job runs unconditionally, so a vanished tarball or a toolchain change

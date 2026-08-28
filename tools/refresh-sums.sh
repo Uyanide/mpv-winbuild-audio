@@ -14,7 +14,7 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 DL=$ROOT/build/dl
 mkdir -p "$DL"
 
-for p in $PACKAGES; do
+for p in $SOURCES; do
     url=$(tarball_url "$p")
     file=$(tarball_file "$p")
     var=$(sha_var "$p")

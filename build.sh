@@ -81,7 +81,7 @@ check_components() {
     local suffix=$1 n up; shift
     for n in "$@"; do
         case $n in *'*'*) continue ;; esac   # globs are expanded by configure itself
-        up=$(printf '%s' "$n" | tr 'a-z' 'A-Z')
+        up=$(printf '%s' "$n" | tr '[:lower:]' '[:upper:]')
         grep -qx "#define CONFIG_${up}_${suffix} 1" "$S/config_components.h" \
             || missing+=("$n ($suffix)")
     done
@@ -137,6 +137,12 @@ EOF
     # For the autotools packages only; meson takes all of this from the cross file.
     export CC=$TARGET-gcc CXX=$TARGET-g++ AR=$TARGET-ar RANLIB=$TARGET-ranlib
     export STRIP=$TARGET-strip WINDRES=$TARGET-windres NM=$TARGET-nm
+    # binutils stamps the PE header with the current time when strip rewrites the
+    # file, which is enough to change the sha256 of an otherwise identical build.
+    # With this and -Wl,--no-insert-timestamp in the cross file, two builds of the
+    # same versions.env produce a byte-identical DLL.
+    export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0}
+
     export CFLAGS="-O2 -pipe -ffunction-sections -fdata-sections"
     export CXXFLAGS="$CFLAGS"
     export LDFLAGS="-static -static-libgcc"
@@ -210,10 +216,12 @@ build_fribidi() {
 build_libass() {
     fetch_pkg libass
 
-    # No font provider at all: fontconfig is a Unix thing and DirectWrite would put
-    # dwrite.dll in the import table. A player that never renders a subtitle does not
-    # need to resolve font names, and every import we skip is one more machine the
-    # DLL still loads on. --disable-require-system-font-provider makes that legal.
+    # No font provider at all. fontconfig is a Unix thing, and DirectWrite -- which
+    # libass reaches via LoadLibraryW("Dwrite.dll"), so it is a runtime lookup rather
+    # than an import -- only matters for resolving font names, which a player that
+    # never renders a subtitle never does. Dropping both keeps the failure modes of a
+    # minimal Windows install out of the picture entirely, and libass allows it via
+    # --disable-require-system-font-provider.
     local opts=(
         --host="$TARGET" --prefix="$PREFIX"
         --enable-static --disable-shared
@@ -439,7 +447,10 @@ do_package() {
     write_buildinfo "$out/libmpv-2.dll" >"$out/BUILDINFO.txt"
 
     local sevenz; sevenz=$(command -v 7z || command -v 7zz) || die "no 7z/7zz on PATH"
-    ( cd "$DIST" && rm -f "$name.7z" && "$sevenz" a -mx=9 -bso0 -bsp0 "$name.7z" "$name" >/dev/null )
+    # -mtm/-mtc/-mta=off: without them the archive stores mtimes, so the DLL can be
+    # byte-identical and the .7z still hash differently on every build.
+    ( cd "$DIST" && rm -f "$name.7z" \
+        && "$sevenz" a -mx=9 -mtm=off -mtc=off -mta=off -bso0 -bsp0 "$name.7z" "$name" >/dev/null )
     ( cd "$DIST" && sha256sum "$name.7z" >SHA256SUMS && cp "$name/BUILDINFO.txt" . )
 
     log "packaged"
@@ -448,18 +459,22 @@ do_package() {
 }
 
 write_buildinfo() {
-    local dll=$1 origin commit
+    local dll=$1 origin commit cdate
     # Each of these can legitimately be absent (a fresh clone with no remote, an
     # export with no .git); an empty substitution must not silently become a URL.
     origin=$(git -C "$ROOT" config --get remote.origin.url 2>/dev/null) || origin=
     commit=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null) || commit=
+    # The commit date, not the build clock: this file goes inside the archive, and a
+    # wall-clock timestamp here would be the one thing keeping two builds of the same
+    # commit from producing a byte-identical .7z.
+    cdate=$(git -C "$ROOT" log -1 --format=%cI 2>/dev/null) || cdate=
 
     cat <<EOF
 libmpv-audio for Windows x86_64 -- audio-only, Vulkan-free, LGPL-2.1-or-later
 
-built     $(date -u +%Y-%m-%dT%H:%M:%SZ)
 recipe    ${origin:-(no git remote configured)}
 commit    ${commit:-(not a git checkout)}
+dated     ${cdate:-(unknown)}
 dll       $(stat -c %s "$dll") bytes, sha256 $(sha256sum <"$dll" | cut -d' ' -f1)
 
 === upstream sources ===
@@ -487,7 +502,8 @@ EOF
 
 # ------------------------------------------------------------------ main ---
 
-usage() { sed -n '2,12p' "$0" | sed 's/^# \?//'; }
+# Print the header comment block, whatever length it grows to.
+usage() { awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "$0"; }
 
 main() {
     local force=0 targets=() a
@@ -499,7 +515,7 @@ main() {
             *)          targets+=("$a") ;;
         esac
     done
-    [ ${#targets[@]} -eq 0 ] && targets=($PACKAGES package)
+    [ ${#targets[@]} -eq 0 ] && read -r -a targets <<<"$PACKAGES package"
 
     setup_toolchain
 

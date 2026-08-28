@@ -55,8 +55,8 @@ tarball_url() {
 }
 
 # sha_var <pkg> -- name of the versions.env variable holding its checksum
-sha_var() { printf '%s_SHA256' "$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')"; }
-ver_var() { printf '%s_VERSION' "$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')"; }
+sha_var() { printf '%s_SHA256' "$(printf '%s' "$1" | tr '[:lower:]-' '[:upper:]_')"; }
+ver_var() { printf '%s_VERSION' "$(printf '%s' "$1" | tr '[:lower:]-' '[:upper:]_')"; }
 
 _gh() {
     if [ -n "${GITHUB_TOKEN:-}" ]; then
@@ -100,4 +100,6 @@ latest_version() {
 PACKAGES="zlib freetype harfbuzz fribidi libass libplacebo ffmpeg mpv"
 # Everything pinned by checksum. vulkan-headers is not a build step of its own;
 # build_libplacebo unpacks it into that tree's 3rdparty/.
+# Consumed by tools/, not by this file:
+# shellcheck disable=SC2034
 SOURCES="$PACKAGES vulkan-headers"

@@ -45,12 +45,13 @@ head_() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 DUMP=$($OBJDUMP -p "$DLL")
 
 head_ "$(basename "$DLL") -- import table"
-IMPORTS=$(sed -n 's/^[[:space:]]*DLL Name:[[:space:]]*//p' <<<"$DUMP" | tr 'A-Z' 'a-z' | sort -u)
-printf '     %s\n' $IMPORTS
+IMPORTS=$(sed -n 's/^[[:space:]]*DLL Name:[[:space:]]*//p' <<<"$DUMP" | tr '[:upper:]' '[:lower:]' | sort -u)
+sed 's/^/     /' <<<"$IMPORTS"
 
 # vulkan-1.dll is the original bug. The runtime DLLs are what Ubuntu's posix-threads
-# mingw default would have added. OPENGL32/d3d11/dwrite are the other ways a driver
-# or a font stack could sneak back in and make the DLL unloadable somewhere.
+# mingw default would have added, and libstdc++-6.dll is what a plain -lstdc++ does.
+# OPENGL32/d3d11/dxgi are the other ways a driver could sneak back in; dwrite.dll
+# should never appear (libass LoadLibrary's it) and is listed as a cheap tripwire.
 for f in vulkan-1.dll libwinpthread-1.dll libgcc_s_seh-1.dll libgcc_s_dw2-1.dll \
          libstdc++-6.dll opengl32.dll d3d11.dll d3d9.dll dxgi.dll dwrite.dll \
          libssp-0.dll libatomic-1.dll; do
@@ -62,7 +63,7 @@ for f in vulkan-1.dll libwinpthread-1.dll libgcc_s_seh-1.dll libgcc_s_dw2-1.dll 
 done
 
 for r in kernel32.dll ws2_32.dll; do
-    grep -qxF "$r" <<<"$IMPORTS" && ok "imports $r" || bad "does not import $r"
+    if grep -qxF "$r" <<<"$IMPORTS"; then ok "imports $r"; else bad "does not import $r"; fi
 done
 
 # A delay-imported vulkan-1.dll would pass every check above and still be a
@@ -82,7 +83,7 @@ EXPORTS=$(sed -n '/\[Ordinal\/Name Pointer\] Table/,$p' <<<"$DUMP" | sed -n 's/^
 for s in mpv_client_api_version mpv_create mpv_initialize mpv_command \
          mpv_set_option_string mpv_set_property mpv_get_property \
          mpv_wait_event mpv_terminate_destroy mpv_error_string mpv_free; do
-    grep -qxF "$s" <<<"$EXPORTS" && ok "exports $s" || bad "does not export $s"
+    if grep -qxF "$s" <<<"$EXPORTS"; then ok "exports $s"; else bad "does not export $s"; fi
 done
 ok "$(wc -l <<<"$EXPORTS") exported symbols total"
 
@@ -90,7 +91,8 @@ ok "$(wc -l <<<"$EXPORTS") exported symbols total"
 
 head_ "binary shape"
 fmt=$($OBJDUMP -f "$DLL" | sed -n 's/.*file format //p')
-[ "$fmt" = pei-x86-64 ] && ok "file format $fmt" || bad "file format is $fmt, expected pei-x86-64"
+if [ "$fmt" = pei-x86-64 ]; then ok "file format $fmt"
+else bad "file format is $fmt, expected pei-x86-64"; fi
 
 bytes=$(stat -c %s "$DLL")
 mb=$((bytes / 1024 / 1024))
@@ -179,7 +181,7 @@ else
             cat "$RUN/fixtures.err" >&2; bad "fixture generation failed"; }
         [ -s "$RUN/fixtures.err" ] && sed 's/^/  /' "$RUN/fixtures.err"
 
-        mapfile -t files < <(cd "$RUN" && ls -1 *.wav *.flac *.mp3 *.ogg *.opus *.m4a *.wma *.tta *.wv *.mka 2>/dev/null)
+        mapfile -t files < <(cd "$RUN" && ls -1 -- *.wav *.flac *.mp3 *.ogg *.opus *.m4a *.wma *.tta *.wv *.mka 2>/dev/null)
         if [ ${#files[@]} -eq 0 ]; then
             bad "no fixtures were generated"
         else
