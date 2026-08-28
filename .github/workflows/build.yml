@@ -1,0 +1,130 @@
+name: build
+
+on:
+  push:
+    tags: ['v*']
+  schedule:
+    # First of the month. This is both an upstream check and a bit-rot check: the
+    # build job runs unconditionally, so a vanished tarball or a toolchain change
+    # in ubuntu-24.04 shows up here instead of the next time someone cuts a release.
+    - cron: '0 4 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            $(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' docker/packages.txt)
+          # Ubuntu defaults these to posix threads, which pulls libwinpthread-1.dll
+          # and libgcc_s_seh-1.dll into the output. Same line as docker/Dockerfile.
+          sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-win32
+          sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-win32
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-ubuntu-24.04-${{ hashFiles('versions.env', 'build.sh', 'cross/mingw64.ini') }}
+          restore-keys: |
+            ccache-ubuntu-24.04-
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Verify
+        run: ./verify/verify.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libmpv-audio-x86_64
+          path: |
+            dist/*.7z
+            dist/SHA256SUMS
+            dist/BUILDINFO.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: libmpv-audio-x86_64
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file dist/BUILDINFO.txt \
+            dist/*.7z dist/SHA256SUMS dist/BUILDINFO.txt
+
+  bump:
+    # Only ever opens a PR. Releases stay a deliberate, human-tagged act, so an
+    # upstream release can never silently change what voicefox downloads.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check upstream releases
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./tools/check-upstream.sh --update | tee /tmp/upstream-report.txt
+
+      - name: Open or update the bump PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- versions.env; then
+            echo "everything already up to date"
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          branch=bump/upstream
+          git checkout -B "$branch"
+          git commit -am "versions: bump upstream releases"
+          git push --force-with-lease -u origin "$branch"
+
+          body=$(printf '%s\n' \
+            'Automated monthly upstream check.' '' \
+            '```' "$(cat /tmp/upstream-report.txt)" '```' '' \
+            'Merging this does not publish anything -- push a `v<mpv>-<rev>` tag to release.' '' \
+            'Worth a look before merging:' \
+            '- an FFmpeg **major** bump drops deprecated APIs; check mpv builds against it' \
+            '- a libplacebo bump can move ahead of what this mpv release expects' \
+            '- reset `BUILD_REV` to 1 if `MPV_VERSION` changed, otherwise bump it')
+
+          if gh pr view "$branch" --json number >/dev/null 2>&1; then
+            gh pr edit "$branch" --body "$body"
+          else
+            gh pr create --base "${GITHUB_REF_NAME}" --head "$branch" \
+              --title "Bump upstream versions" --body "$body"
+          fi

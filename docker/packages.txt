@@ -1,0 +1,37 @@
+# Build environment for mpv-winbuild-audio.
+#
+# This list is the single source of truth for both the local Docker image
+# (docker/Dockerfile) and the GitHub Actions runner (.github/workflows/build.yml),
+# so the two environments cannot drift apart.
+
+# --- cross toolchain ---
+binutils-mingw-w64-x86-64
+gcc-mingw-w64-x86-64
+g++-mingw-w64-x86-64
+mingw-w64-tools
+
+# --- build systems ---
+build-essential
+meson
+ninja-build
+pkgconf
+python3
+# libplacebo generates its GLSL sources with a jinja2-based preprocessor at build
+# time; its 3rdparty/jinja submodule is empty in the release tarball.
+python3-jinja2
+nasm
+yasm
+
+# --- fetching and packaging ---
+ca-certificates
+curl
+git
+xz-utils
+p7zip-full
+
+# --- speedup, optional at runtime ---
+ccache
+
+# --- verification: fixtures are made with the host ffmpeg, smoke test runs under wine ---
+ffmpeg
+wine
