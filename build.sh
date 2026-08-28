@@ -45,7 +45,7 @@ fetch() {
         info "checksum changed, refetching $2"
     fi
     info "fetch $url"
-    curl -fL --retry 3 --retry-delay 2 --max-time 900 -o "$f.part" "$url"
+    curl -fL --no-progress-meter --retry 3 --retry-delay 2 --max-time 900 -o "$f.part" "$url"
     got=$(sha256sum <"$f.part" | cut -d' ' -f1)
     [ "$got" = "$want" ] || die "sha256 mismatch for $2
   expected $want

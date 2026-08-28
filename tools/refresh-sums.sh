@@ -22,7 +22,7 @@ for p in $SOURCES; do
 
     if [ ! -f "$DL/$file" ]; then
         echo "fetching $file"
-        curl -fL --retry 3 --max-time 900 -o "$DL/$file.part" "$url"
+        curl -fL --no-progress-meter --retry 3 --max-time 900 -o "$DL/$file.part" "$url"
         mv -f "$DL/$file.part" "$DL/$file"
     fi
 
