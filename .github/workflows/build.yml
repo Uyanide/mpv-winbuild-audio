@@ -36,18 +36,36 @@ jobs:
           sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-win32
           sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-win32
 
+      # mpv bakes its entire meson command line into the DLL as the string it
+      # reports as `Configuration:`, absolute -Dprefix= and --cross-file= included.
+      # Building under $GITHUB_WORKSPACE therefore produced a DLL that could never
+      # match a local ./dev.sh build, which builds at /work: same sources, same
+      # toolchain, different bytes, purely because one path is longer than the
+      # other. Mounting the workspace at /work removes the only variable there was.
+      - name: Mount the workspace where ./dev.sh builds
+        run: |
+          sudo mkdir -p /work
+          sudo mount --bind "$GITHUB_WORKSPACE" /work
+          # A mount that silently did not take would build at the wrong path and
+          # produce a green, subtly different artifact. -ef compares device+inode.
+          test /work/build.sh -ef "$GITHUB_WORKSPACE/build.sh"
+
       - name: Restore ccache
         uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
-          key: ccache-ubuntu-24.04-${{ hashFiles('versions.env', 'build.sh', 'cross/mingw64.ini') }}
+          # The build path is part of what ccache hashes, so moving to /work costs
+          # one cold build and then caches as before.
+          key: ccache-ubuntu-24.04-work-${{ hashFiles('versions.env', 'build.sh', 'cross/mingw64.ini') }}
           restore-keys: |
-            ccache-ubuntu-24.04-
+            ccache-ubuntu-24.04-work-
 
       - name: Build
+        working-directory: /work
         run: ./build.sh
 
       - name: Verify
+        working-directory: /work
         run: ./verify/verify.sh
 
       - uses: actions/upload-artifact@v7
