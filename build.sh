@@ -30,6 +30,14 @@ TOOLS=$BUILD/tools
 ARGS=$BUILD/args
 JOBS=${JOBS:-$(nproc)}
 
+# Sources are unpacked under $ROOT, so a `git describe` run inside one of them
+# walks up and finds *this* repository. libplacebo's src/version.py does exactly
+# that and bakes the answer into the DLL as "v7.360.1 (<our tag>)", which made the
+# artifact depend on our tag state -- and on `--dirty`, so an uncommitted edit here
+# would ship inside libmpv. A ceiling at $ROOT stops the walk; git never excludes
+# the working directory itself, so write_buildinfo's own `git -C "$ROOT"` still works.
+export GIT_CEILING_DIRECTORIES=$ROOT
+
 # ---------------------------------------------------------------- helpers ---
 
 log()  { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
