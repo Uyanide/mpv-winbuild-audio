@@ -13,7 +13,7 @@
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-# shellcheck source=../versions.env
+# shellcheck source=versions.env
 . "$ROOT/versions.env"
 
 TARGET=x86_64-w64-mingw32

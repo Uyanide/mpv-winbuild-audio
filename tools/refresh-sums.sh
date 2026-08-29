@@ -8,7 +8,9 @@
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=versions.env
 . "$ROOT/versions.env"
+# shellcheck source=tools/upstream.sh
 . "$ROOT/tools/upstream.sh"
 
 DL=$ROOT/build/dl

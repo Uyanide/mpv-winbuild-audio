@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+
 # Where every upstream tarball comes from, and how to find out what the newest
 # release is. Sourced by build.sh, tools/refresh-sums.sh and tools/check-upstream.sh
 # so a checksum can never be computed over a different URL than the build fetches.

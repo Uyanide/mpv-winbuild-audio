@@ -11,7 +11,9 @@
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=versions.env
 . "$ROOT/versions.env"
+# shellcheck source=tools/upstream.sh
 . "$ROOT/tools/upstream.sh"
 
 update=0
@@ -46,6 +48,7 @@ done
 # vulkan-headers is not an independent release -- it tracks whatever commit the
 # current libplacebo pins. So resolve it last, and re-read versions.env first so
 # that a libplacebo bump made just above is the one it follows.
+# shellcheck source=versions.env
 [ "$update" = 1 ] && . "$ROOT/versions.env"
 compare_one vulkan-headers
 

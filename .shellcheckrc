@@ -1,0 +1,15 @@
+# Every script here computes ROOT from BASH_SOURCE and then sources
+# "$ROOT/versions.env" and "$ROOT/tools/upstream.sh". ShellCheck cannot expand
+# ROOT, so it drops the variable and looks for the remainder relative to the
+# *current directory*. That silently works from the repo root and breaks
+# everywhere else, which is how verify/verify.sh shipped with a source directive
+# that never resolved.
+
+# Follow sourced files that were not named on the command line, so plain
+# `shellcheck *.sh` behaves the same as `shellcheck -x`.
+external-sources=true
+
+# Resolve them relative to the script being checked instead of the caller's cwd.
+# SCRIPTDIR covers build.sh at the root; SCRIPTDIR/.. covers tools/ and verify/.
+source-path=SCRIPTDIR
+source-path=SCRIPTDIR/..
