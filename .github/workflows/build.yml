@@ -121,7 +121,11 @@ jobs:
   bump:
     # Only ever opens a PR. Releases stay a deliberate, human-tagged act, so an
     # upstream release can never silently change what downstream downloads.
-    if: github.event_name == 'schedule'
+    # workflow_dispatch too: a monthly run that failed cannot be retried with
+    # `gh run rerun`, which replays the workflow file at the run's original SHA,
+    # and schedules cannot be fired on demand -- without this the only recovery
+    # from a broken bump was waiting until next month.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
