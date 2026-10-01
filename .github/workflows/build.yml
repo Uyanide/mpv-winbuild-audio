@@ -149,6 +149,14 @@ jobs:
           branch=bump/upstream
           git checkout -B "$branch"
           git commit -am "versions: bump upstream releases"
+          # actions/checkout fetches a single ref, so there is no
+          # refs/remotes/origin/$branch here, and --force-with-lease with no
+          # remote-tracking ref reads as "the branch must not exist yet". The
+          # first run therefore pushed and every later one died with
+          # `! [rejected] bump/upstream -> bump/upstream (stale info)`, which
+          # breaks the whole point of a branch that is meant to be rewritten
+          # each month. Fetch it first so the lease compares against something.
+          git fetch --quiet origin "+refs/heads/$branch:refs/remotes/origin/$branch" || true
           git push --force-with-lease -u origin "$branch"
 
           body=$(printf '%s\n' \
