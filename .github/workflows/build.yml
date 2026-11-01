@@ -172,8 +172,9 @@ jobs:
             '- a libplacebo bump can move ahead of what this mpv release expects' \
             '- reset `BUILD_REV` to 1 if `MPV_VERSION` changed, otherwise bump it')
 
-          if gh pr view "$branch" --json number >/dev/null 2>&1; then
-            gh pr edit "$branch" --body "$body"
+          open_pr=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$open_pr" ]; then
+            gh pr edit "$open_pr" --body "$body"
           else
             gh pr create --base "${GITHUB_REF_NAME}" --head "$branch" \
               --title "Bump upstream versions" --body "$body"
