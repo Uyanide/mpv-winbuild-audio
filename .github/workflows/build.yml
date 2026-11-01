@@ -127,11 +127,23 @@ jobs:
     # from a broken bump was waiting until next month.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
+    # The push and the PR go out under secrets.BUMP_TOKEN, not github.token.
+    # Anything done with github.token deliberately triggers no further workflow
+    # runs, so a bump PR opened with it never got the pull_request build this
+    # workflow exists to give it -- October's #1 was only built because someone
+    # reopened it by hand an hour later. BUMP_TOKEN is a fine-grained PAT on this
+    # repository with Contents and Pull requests read/write. github.token is left
+    # with nothing to write, hence read-only here.
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
     steps:
+      # checkout persists its token as the credential for `git push`, so the
+      # push has to be given BUMP_TOKEN here, not just the gh calls below. An
+      # unset secret is an empty input, which checkout refuses outright rather
+      # than quietly falling back to github.token.
       - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.BUMP_TOKEN }}
 
       - name: Check upstream releases
         env:
@@ -140,7 +152,7 @@ jobs:
 
       - name: Open or update the bump PR
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.BUMP_TOKEN }}
         run: |
           if git diff --quiet -- versions.env; then
             echo "everything already up to date"
