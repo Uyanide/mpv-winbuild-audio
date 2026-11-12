@@ -113,9 +113,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          { echo '````text'; cat dist/BUILDINFO.txt; echo '````'; } >notes.md
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
-            --notes-file dist/BUILDINFO.txt \
+            --notes-file notes.md \
             dist/*.7z dist/SHA256SUMS dist/BUILDINFO.txt
 
   bump:
