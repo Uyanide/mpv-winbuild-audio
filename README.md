@@ -32,6 +32,7 @@ libmpv-audio-x86_64-v<mpv>-<rev>.7z
 ├── libmpv-2.dll
 ├── libmpv.dll.a
 ├── include/mpv/{client.h,render.h,render_gl.h,stream_cb.h}
+├── licenses/<component>/…
 └── BUILDINFO.txt
 ```
 
@@ -234,3 +235,8 @@ Distributing the DLL therefore carries LGPL obligations, in particular that
 recipients can relink against a modified libmpv. The import library is shipped in
 every archive, `BUILDINFO.txt` names the exact sources and flags, and this
 repository is the complete build recipe.
+
+Every archive carries the licence texts in `licenses/<component>/`, copied from the
+source trees that were actually compiled, plus the notices for the statically
+linked toolchain runtime (mingw-w64 CRT, libgcc, libstdc++). If you redistribute
+`libmpv-2.dll`, ship that directory with it.

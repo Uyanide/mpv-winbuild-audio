@@ -455,6 +455,7 @@ do_package() {
         install -Dm644 "$PREFIX/include/mpv/$h" "$out/include/mpv/$h"
     done
 
+    install_licenses "$out/licenses"
     write_buildinfo "$out/libmpv-2.dll" >"$out/BUILDINFO.txt"
 
     local sevenz; sevenz=$(command -v 7z || command -v 7zz) || die "no 7z/7zz on PATH"
@@ -467,6 +468,47 @@ do_package() {
     log "packaged"
     ls -l "$DIST/$name.7z"
     cat "$DIST/SHA256SUMS"
+}
+
+# install_licenses <dir> -- the licence text of everything linked into the DLL
+#
+# The DLL is redistributed on its own, away from this repository, and LGPL, ISC,
+# MIT, FTL and Zlib all require their text or notice to travel with the binary.
+# Texts are taken from the exact source trees that were compiled, so a version
+# bump can never ship last release's wording -- and `./build.sh package` against
+# sources that no longer match versions.env dies here instead of mislabelling.
+install_licenses() {
+    local out=$1 e pkg f src
+    # GPL texts (mpv's LICENSE.GPL, FFmpeg's COPYING.GPL*, freetype's GPLv2.TXT) are
+    # left out on purpose: nothing here is built or licensed under them, and shipping
+    # them next to an LGPL DLL would only make the terms ambiguous.
+    for e in \
+        mpv:LICENSE.LGPL mpv:Copyright \
+        ffmpeg:COPYING.LGPLv2.1 ffmpeg:LICENSE.md \
+        libplacebo:LICENSE \
+        fribidi:COPYING \
+        libass:COPYING \
+        harfbuzz:COPYING \
+        freetype:LICENSE.TXT freetype:docs/FTL.TXT \
+        zlib:LICENSE
+    do
+        pkg=${e%%:*} f=${e#*:}
+        src=$SRC/$(tarball_dir "$pkg")/$f
+        [ -s "$src" ] || die "licence file missing: $src (rebuild $pkg, or upstream moved it)"
+        install -Dm644 "$src" "$out/$pkg/${f##*/}"
+    done
+
+    # -static puts libgcc, libstdc++ and the mingw-w64 CRT inside the DLL as well.
+    # Their notices only exist as the distro's copyright files, so this is the one
+    # place packaging reads from outside build/ -- same files in ./dev.sh and CI.
+    for e in \
+        mingw-w64-runtime:mingw-w64-x86-64-dev \
+        gcc-runtime:gcc-mingw-w64-x86-64-win32
+    do
+        src=/usr/share/doc/${e#*:}/copyright
+        [ -s "$src" ] || die "toolchain licence file missing: $src (package through ./dev.sh)"
+        install -Dm644 "$src" "$out/${e%%:*}/copyright"
+    done
 }
 
 write_buildinfo() {
@@ -487,6 +529,7 @@ recipe    ${origin:-(no git remote configured)}
 commit    ${commit:-(not a git checkout)}
 dated     ${cdate:-(unknown)}
 dll       $(stat -c %s "$dll") bytes, sha256 $(sha256sum <"$dll" | cut -d' ' -f1)
+licences  licenses/<component>/ inside the archive
 
 === upstream sources ===
 EOF

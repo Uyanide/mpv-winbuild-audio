@@ -152,6 +152,23 @@ else
     for o in GPL NONFREE VULKAN D3D11VA DXVA2 VAAPI VDPAU OPENSSL GNUTLS; do ffoff "$o"; done
 fi
 
+# ----------------------------------------------------------------- licences ---
+
+# Only meaningful for a packaged DLL; a bare one out of build/prefix has no archive
+# around it to be missing anything.
+LIC=$(dirname "$DLL")/licenses
+if [ -f "$(dirname "$DLL")/BUILDINFO.txt" ]; then
+    head_ "licence texts"
+    for c in mpv ffmpeg libplacebo fribidi libass harfbuzz freetype zlib \
+             mingw-w64-runtime gcc-runtime; do
+        if [ -n "$(find "$LIC/$c" -type f -size +0 -print -quit 2>/dev/null)" ]; then
+            ok "licenses/$c"
+        else
+            bad "licenses/$c is missing or empty"
+        fi
+    done
+fi
+
 # ---------------------------------------------------------- wine smoke test ---
 
 if [ "${SKIP_SMOKE:-0}" = 1 ]; then
