@@ -331,7 +331,7 @@ build_ffmpeg() {
         aformat aresample anull atrim asetpts asettb aselect
         atempo volume pan channelmap channelsplit join amerge amix adelay
         dynaudnorm loudnorm acompressor alimiter equalizer bass treble
-        highpass lowpass firequalizer superequalizer silencedetect astats
+        highpass lowpass bandpass firequalizer superequalizer silencedetect astats
         anullsrc aevalsrc sine
         null format scale
     )
