@@ -4,10 +4,6 @@
 #
 #   ./tools/check-upstream.sh            report only
 #   ./tools/check-upstream.sh --update   rewrite versions.env to the newest versions
-#
-# The monthly workflow runs this with --update and opens a PR. It deliberately does
-# not release anything: a human still reviews and tags. FFmpeg major bumps in
-# particular drop deprecated APIs and need a look at whether mpv has caught up.
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -45,9 +41,7 @@ for p in $PACKAGES; do
     compare_one "$p"
 done
 
-# vulkan-headers is not an independent release -- it tracks whatever commit the
-# current libplacebo pins. So resolve it last, and re-read versions.env first so
-# that a libplacebo bump made just above is the one it follows.
+# vulkan-headers follows libplacebo, so resolve it after any libplacebo bump.
 # shellcheck source=versions.env
 [ "$update" = 1 ] && . "$ROOT/versions.env"
 compare_one vulkan-headers

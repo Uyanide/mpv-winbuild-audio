@@ -1,10 +1,6 @@
 # shellcheck shell=bash
 
-# Where every upstream tarball comes from, and how to find out what the newest
-# release is. Sourced by build.sh, tools/refresh-sums.sh and tools/check-upstream.sh
-# so a checksum can never be computed over a different URL than the build fetches.
-#
-# Expects versions.env to have been sourced already.
+# Upstream tarball locations and release lookups. Source versions.env first.
 
 # tarball_file <pkg> -- name under build/dl
 tarball_file() {
@@ -46,8 +42,6 @@ tarball_url() {
         harfbuzz)   echo "https://github.com/harfbuzz/harfbuzz/releases/download/$HARFBUZZ_VERSION/harfbuzz-$HARFBUZZ_VERSION.tar.xz" ;;
         fribidi)    echo "https://github.com/fribidi/fribidi/releases/download/v$FRIBIDI_VERSION/fribidi-$FRIBIDI_VERSION.tar.xz" ;;
         libass)     echo "https://github.com/libass/libass/releases/download/$LIBASS_VERSION/libass-$LIBASS_VERSION.tar.xz" ;;
-        # libplacebo publishes no source tarball asset; the git archive is fine because
-        # the 3rdparty/ submodules it omits are only read by backends we disable.
         libplacebo) echo "https://github.com/haasn/libplacebo/archive/refs/tags/v$LIBPLACEBO_VERSION.tar.gz" ;;
         ffmpeg)     echo "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz" ;;
         mpv)        echo "https://github.com/mpv-player/mpv/archive/refs/tags/v$MPV_VERSION.tar.gz" ;;
@@ -82,15 +76,14 @@ latest_version() {
         libass)     _gh_latest_release libass/libass ;;
         libplacebo) _gh_latest_release haasn/libplacebo     | sed 's/^v//' ;;
         mpv)        _gh_latest_release mpv-player/mpv       | sed 's/^v//' ;;
-        # Savannah has no release API; the GitHub mirror tags VER-2-14-3 style.
+        # GitHub mirror, tags like VER-2-14-3
         freetype)   _gh "https://api.github.com/repos/freetype/freetype/tags?per_page=50" \
                         | sed -n 's/.*"name": *"VER-\([0-9-]*\)".*/\1/p' \
                         | tr '-' '.' | sort -V | tail -1 ;;
-        # Stable tags only: nX.Y[.Z], never nX.Y-dev.
         ffmpeg)     _gh "https://api.github.com/repos/FFmpeg/FFmpeg/tags?per_page=100" \
                         | sed -n 's/.*"name": *"n\([0-9][0-9.]*\)".*/\1/p' \
                         | grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$' | sort -V | tail -1 ;;
-        # Not a released version: whatever commit this libplacebo pins.
+        # whatever commit this libplacebo pins
         vulkan-headers) _gh "https://api.github.com/repos/haasn/libplacebo/contents/3rdparty?ref=v$LIBPLACEBO_VERSION" \
                             | tr ',' '\n' | grep -A5 '"name": *"Vulkan-Headers"' \
                             | sed -n 's/.*"sha": *"\([0-9a-f]*\)".*/\1/p' | head -1 ;;
@@ -100,8 +93,6 @@ latest_version() {
 
 # Build steps, in dependency order.
 PACKAGES="zlib freetype harfbuzz fribidi libass libplacebo ffmpeg mpv"
-# Everything pinned by checksum. vulkan-headers is not a build step of its own;
-# build_libplacebo unpacks it into that tree's 3rdparty/.
-# Consumed by tools/, not by this file:
+# Everything pinned by checksum.
 # shellcheck disable=SC2034
 SOURCES="$PACKAGES vulkan-headers"

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
 # Run anything from this repo inside the same Ubuntu 24.04 image CI uses.
-# Nothing (mingw-w64, meson, wine, ...) has to be installed on the host.
 #
 #   ./dev.sh                     interactive shell in the build container
 #   ./dev.sh ./build.sh          full cross build
@@ -18,9 +17,6 @@ if [ "${REBUILD:-0}" = 1 ] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; t
     docker build -t "$IMAGE" "$ROOT/docker"
 fi
 
-# HOME lives under build/ so wine's prefix and ccache survive between runs and
-# stay out of the source tree. uid 1000 is the `ubuntu` account in the image, so
-# the container has a real passwd entry and files land back owned by the host user.
 mkdir -p "$ROOT/build/home" "$ROOT/build/ccache"
 
 tty_flags=(-i)

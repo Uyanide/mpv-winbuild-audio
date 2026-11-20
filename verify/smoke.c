@@ -1,14 +1,4 @@
-/*
- * Minimal libmpv consumer, cross-compiled and run under wine by verify.sh.
- *
- * It exists to prove two things the static import-table checks cannot:
- *   1. the DLL actually loads on a machine with no GPU driver -- wine has no
- *      vulkan-1.dll either, which is precisely the CI failure this build fixes;
- *   2. the FFmpeg whitelist really covers every container/codec we ship for,
- *      because a missing decoder shows up here and nowhere in the build log.
- *
- * Usage: smoke.exe <audiofile>...   -- exits non-zero if any file fails.
- */
+/* smoke.exe <audiofile>... -- run under wine by verify.sh */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,8 +7,6 @@
 
 static void set_opt(mpv_handle *ctx, const char *name, const char *val)
 {
-    /* Best effort: some of these are tuning knobs that may not exist in every
-       mpv release, and none of them is worth failing the smoke test over. */
     mpv_set_option_string(ctx, name, val);
 }
 
@@ -87,8 +75,7 @@ static int play(const char *path)
         }
     }
 
-    /* An empty codec name means mpv opened the container but decoded nothing,
-       which is exactly how a missing entry in the decoder whitelist presents. */
+    /* no codec name = missing decoder */
     if (!codec || !codec[0]) {
         fprintf(stderr, "FAIL %s: no audio-codec-name was ever reported\n", path);
         goto out;

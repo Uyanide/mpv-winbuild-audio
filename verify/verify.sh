@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 #
-# Assert that the produced libmpv-2.dll is the thing we meant to produce.
-#
-# This file is the reason the repository exists. The Vulkan dependency that broke
-# downstream CI was not a build failure -- it was a perfectly green build whose
-# output could not be loaded on a machine without a GPU driver. Nothing but an
-# explicit check on the artifact catches that class of bug.
+# Check the built libmpv-2.dll.
 #
 #   ./verify/verify.sh                 verify dist/<latest>/libmpv-2.dll
 #   ./verify/verify.sh path/to/dll     verify a specific DLL
@@ -22,8 +17,7 @@ DIST=${DIST_DIR:-$ROOT/dist}
 OBJDUMP=$TARGET-objdump
 MAX_SIZE_MB=${MAX_SIZE_MB:-25}
 
-# fixme-all, not -all: the fixme spam goes away but err:module:import_dll stays,
-# and that line is the whole point -- it names the DLL that could not be loaded.
+# keep err:module:import_dll, which names a DLL that failed to load
 export WINEDEBUG=${WINEDEBUG:-fixme-all}
 export WINEPREFIX=${WINEPREFIX:-$BUILD/wineprefix}
 
@@ -39,19 +33,13 @@ head_() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
 # ------------------------------------------------------------ import table ---
 
-# Dumped once into a variable on purpose: `objdump | grep -q` would SIGPIPE
-# objdump the moment grep matches, and with `set -o pipefail` that turns a found
-# match into a failed assertion -- a false negative on the checks that matter most.
+# Not piped into grep -q: SIGPIPE + pipefail would turn a match into a failure.
 DUMP=$($OBJDUMP -p "$DLL")
 
 head_ "$(basename "$DLL") -- import table"
 IMPORTS=$(sed -n 's/^[[:space:]]*DLL Name:[[:space:]]*//p' <<<"$DUMP" | tr '[:upper:]' '[:lower:]' | sort -u)
 sed 's/^/     /' <<<"$IMPORTS"
 
-# vulkan-1.dll is the original bug. The runtime DLLs are what Ubuntu's posix-threads
-# mingw default would have added, and libstdc++-6.dll is what a plain -lstdc++ does.
-# OPENGL32/d3d11/dxgi are the other ways a driver could sneak back in; dwrite.dll
-# should never appear (libass LoadLibrary's it) and is listed as a cheap tripwire.
 for f in vulkan-1.dll libwinpthread-1.dll libgcc_s_seh-1.dll libgcc_s_dw2-1.dll \
          libstdc++-6.dll opengl32.dll d3d11.dll d3d9.dll dxgi.dll dwrite.dll \
          libssp-0.dll libatomic-1.dll; do
@@ -66,8 +54,6 @@ for r in kernel32.dll ws2_32.dll; do
     if grep -qxF "$r" <<<"$IMPORTS"; then ok "imports $r"; else bad "does not import $r"; fi
 done
 
-# A delay-imported vulkan-1.dll would pass every check above and still be a
-# regression, so the directory has to stay empty outright.
 head_ "delay imports"
 if grep -q 'Delay Import Tables' <<<"$DUMP"; then
     bad "delay import directory is not empty:"
@@ -103,14 +89,7 @@ else
 fi
 
 # ------------------------------------------------------- ffmpeg components ---
-#
-# The wine matrix below can only test formats the host ffmpeg can encode, and it
-# cannot encode APE at all. Reading the decoder list straight out of the FFmpeg
-# build tree covers the rest, and catches a whitelist typo in seconds rather than
-# after a full mpv rebuild.
 
-# FFmpeg keeps build flags in config.h and per-component defines in
-# config_components.h; both are needed here.
 FFSRC=$BUILD/src/ffmpeg-$FFMPEG_VERSION
 FFCONF=$FFSRC/config.h
 FFCOMP=$FFSRC/config_components.h
@@ -133,9 +112,7 @@ else
              MATROSKA_DEMUXER MOV_DEMUXER MP3_DEMUXER MPEGTS_DEMUXER OGG_DEMUXER WAV_DEMUXER; do ffon "$d"; done
     for f in ARESAMPLE_FILTER AFORMAT_FILTER ATEMPO_FILTER VOLUME_FILTER; do ffon "$f"; done
 
-    # abuffer/abuffersink have no CONFIG_ define -- they are unconditional in
-    # libavfilter. Without them mpv's lavfi bridge fails at runtime and nowhere
-    # else, so assert the symbols rather than trusting that they are always there.
+    # abuffer/abuffersink have no CONFIG_ define
     avf_syms=$($TARGET-nm --defined-only "$BUILD/prefix/lib/libavfilter.a" 2>/dev/null || true)
     for sym in av_buffersrc_add_frame av_buffersink_get_frame; do
         if grep -q " T $sym\$" <<<"$avf_syms"; then ok "$sym"; else bad "$sym missing from libavfilter"; fi
@@ -144,18 +121,13 @@ else
     for b in AAC_ADTSTOASC_BSF EXTRACT_EXTRADATA_BSF; do ffon "$b"; done
     ffon SCHANNEL
     ffon ZLIB
-    # Threading is a HAVE_ macro, not a CONFIG_ one. Windows-native threads are
-    # what keep libwinpthread-1.dll out of the import table.
     ffdef HAVE_W32THREADS 1
     ffdef HAVE_PTHREADS 0
-    # LGPL, and no GPU path at all.
     for o in GPL NONFREE VULKAN D3D11VA DXVA2 VAAPI VDPAU OPENSSL GNUTLS; do ffoff "$o"; done
 fi
 
 # ----------------------------------------------------------------- licences ---
 
-# Only meaningful for a packaged DLL; a bare one out of build/prefix has no archive
-# around it to be missing anything.
 LIC=$(dirname "$DLL")/licenses
 if [ -f "$(dirname "$DLL")/BUILDINFO.txt" ]; then
     head_ "licence texts"
@@ -191,7 +163,6 @@ else
             -I"$inc" "$implib" -static -static-libgcc
         cp "$DLL" "$RUN/"
 
-        # First use of a prefix prints a page of setup noise; get it out of the way.
         wineboot -i >/dev/null 2>&1 || true
 
         "$ROOT/verify/fixtures.sh" "$RUN" >/dev/null 2>"$RUN/fixtures.err" || {
@@ -202,8 +173,6 @@ else
         if [ ${#files[@]} -eq 0 ]; then
             bad "no fixtures were generated"
         else
-            # Loading at all is the real assertion here: wine has no vulkan-1.dll,
-            # exactly like the GitHub runner that started this.
             if ( cd "$RUN" && wine ./smoke.exe "${files[@]}" 2>&1 | sed 's/^/  /' ; exit "${PIPESTATUS[0]}" ); then
                 ok "played ${#files[@]} fixtures under wine"
             else

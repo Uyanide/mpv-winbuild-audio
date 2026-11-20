@@ -3,13 +3,8 @@ name: build
 on:
   push:
     tags: ['v*']
-  # So that the monthly bump PR is actually built and verified before anyone
-  # merges it -- an upstream bump that does not build is the whole thing to catch.
   pull_request:
   schedule:
-    # First of the month. This is both an upstream check and a bit-rot check: the
-    # build job runs unconditionally, so a vanished tarball or a toolchain change
-    # in ubuntu-24.04 shows up here instead of the next time someone cuts a release.
     - cron: '0 4 1 * *'
   workflow_dispatch:
 
@@ -26,12 +21,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The archive is named from versions.env and the release from the tag, and
-      # nothing used to tie the two together: v0.41.0-2 was tagged without bumping
-      # BUILD_REV, so it shipped an asset called libmpv-audio-x86_64-v0.41.0-1.7z --
-      # a different DLL under a filename that already existed in another release,
-      # which is the one way this repository could hand downstream the wrong bytes.
-      # Cheap to check, and checked before the build rather than after it.
       - name: Check the tag against versions.env
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -48,31 +37,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             $(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' docker/packages.txt)
-          # Ubuntu defaults these to posix threads, which pulls libwinpthread-1.dll
-          # and libgcc_s_seh-1.dll into the output. Same line as docker/Dockerfile.
+          # posix-threads default would import libwinpthread-1.dll
           sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-win32
           sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-win32
 
-      # mpv bakes its entire meson command line into the DLL as the string it
-      # reports as `Configuration:`, absolute -Dprefix= and --cross-file= included.
-      # Building under $GITHUB_WORKSPACE therefore produced a DLL that could never
-      # match a local ./dev.sh build, which builds at /work: same sources, same
-      # toolchain, different bytes, purely because one path is longer than the
-      # other. Mounting the workspace at /work removes the only variable there was.
+      # mpv embeds its absolute build paths, so build at the same path as ./dev.sh.
       - name: Mount the workspace where ./dev.sh builds
         run: |
           sudo mkdir -p /work
           sudo mount --bind "$GITHUB_WORKSPACE" /work
-          # A mount that silently did not take would build at the wrong path and
-          # produce a green, subtly different artifact. -ef compares device+inode.
           test /work/build.sh -ef "$GITHUB_WORKSPACE/build.sh"
 
       - name: Restore ccache
         uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
-          # The build path is part of what ccache hashes, so moving to /work costs
-          # one cold build and then caches as before.
           key: ccache-ubuntu-24.04-work-${{ hashFiles('versions.env', 'build.sh', 'cross/mingw64.ini') }}
           restore-keys: |
             ccache-ubuntu-24.04-work-
@@ -120,28 +99,12 @@ jobs:
             dist/*.7z dist/SHA256SUMS dist/BUILDINFO.txt
 
   bump:
-    # Only ever opens a PR. Releases stay a deliberate, human-tagged act, so an
-    # upstream release can never silently change what downstream downloads.
-    # workflow_dispatch too: a monthly run that failed cannot be retried with
-    # `gh run rerun`, which replays the workflow file at the run's original SHA,
-    # and schedules cannot be fired on demand -- without this the only recovery
-    # from a broken bump was waiting until next month.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    # The push and the PR go out under secrets.BUMP_TOKEN, not github.token.
-    # Anything done with github.token deliberately triggers no further workflow
-    # runs, so a bump PR opened with it never got the pull_request build this
-    # workflow exists to give it -- October's #1 was only built because someone
-    # reopened it by hand an hour later. BUMP_TOKEN is a fine-grained PAT on this
-    # repository with Contents and Pull requests read/write. github.token is left
-    # with nothing to write, hence read-only here.
+    # Writes use BUMP_TOKEN: a PR opened with github.token triggers no CI.
     permissions:
       contents: read
     steps:
-      # checkout persists its token as the credential for `git push`, so the
-      # push has to be given BUMP_TOKEN here, not just the gh calls below. An
-      # unset secret is an empty input, which checkout refuses outright rather
-      # than quietly falling back to github.token.
       - uses: actions/checkout@v7
         with:
           token: ${{ secrets.BUMP_TOKEN }}
@@ -166,13 +129,7 @@ jobs:
           branch=bump/upstream
           git checkout -B "$branch"
           git commit -am "versions: bump upstream releases"
-          # actions/checkout fetches a single ref, so there is no
-          # refs/remotes/origin/$branch here, and --force-with-lease with no
-          # remote-tracking ref reads as "the branch must not exist yet". The
-          # first run therefore pushed and every later one died with
-          # `! [rejected] bump/upstream -> bump/upstream (stale info)`, which
-          # breaks the whole point of a branch that is meant to be rewritten
-          # each month. Fetch it first so the lease compares against something.
+          # --force-with-lease needs the remote-tracking ref
           git fetch --quiet origin "+refs/heads/$branch:refs/remotes/origin/$branch" || true
           git push --force-with-lease -u origin "$branch"
 

@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 #
 # Recompute every *_SHA256 in versions.env for the versions it currently pins.
-# Run this after changing a *_VERSION by hand.
-#
-# It downloads through exactly the same tarball_url() the build uses, so the
-# checksum can never end up describing a different file than the one fetched.
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)

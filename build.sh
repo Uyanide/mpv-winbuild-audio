@@ -7,15 +7,11 @@
 #   ./build.sh -f mpv          rebuild even though the stamp says it is done
 #   ./build.sh package         re-run only the packaging step
 #
-# Every package installs static libs into build/prefix and is wired to the next
-# one purely through pkg-config; nothing from the host prefix can leak in.
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=versions.env
 . "$ROOT/versions.env"
-# tarball_url/tarball_file/tarball_dir live here so that tools/refresh-sums.sh
-# can never compute a checksum over a different URL than this script fetches.
 # shellcheck source=tools/upstream.sh
 . "$ROOT/tools/upstream.sh"
 
@@ -30,12 +26,7 @@ TOOLS=$BUILD/tools
 ARGS=$BUILD/args
 JOBS=${JOBS:-$(nproc)}
 
-# Sources are unpacked under $ROOT, so a `git describe` run inside one of them
-# walks up and finds *this* repository. libplacebo's src/version.py does exactly
-# that and bakes the answer into the DLL as "v7.360.1 (<our tag>)", which made the
-# artifact depend on our tag state -- and on `--dirty`, so an uncommitted edit here
-# would ship inside libmpv. A ceiling at $ROOT stops the walk; git never excludes
-# the working directory itself, so write_buildinfo's own `git -C "$ROOT"` still works.
+# Stop libplacebo's `git describe` from finding this repo and baking our tag into the DLL.
 export GIT_CEILING_DIRECTORIES=$ROOT
 
 # ---------------------------------------------------------------- helpers ---
@@ -116,9 +107,7 @@ meson_build() {
 setup_toolchain() {
     mkdir -p "$DL" "$SRC" "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$STAMP" "$TOOLS" "$ARGS"
 
-    # Ubuntu's mingw-w64 ships no x86_64-w64-mingw32-pkg-config. Supplying our own
-    # is not just convenience: PKG_CONFIG_LIBDIR pinned to our prefix is what makes
-    # it impossible for a host .pc file to be picked up by a cross build.
+    # Ubuntu ships no triplet pkg-config; ours also keeps host .pc files out.
     cat >"$TOOLS/$TARGET-pkg-config" <<EOF
 #!/bin/sh
 PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
@@ -128,8 +117,6 @@ exec pkg-config "\$@"
 EOF
     chmod +x "$TOOLS/$TARGET-pkg-config"
 
-    # Transparent ccache shims: both meson (via the cross file) and ffmpeg's
-    # configure (via --cross-prefix) find these on PATH without knowing about them.
     if command -v ccache >/dev/null 2>&1; then
         local cc; cc=$(command -v ccache)
         ln -sf "$cc" "$TOOLS/$TARGET-gcc"
@@ -142,13 +129,9 @@ EOF
     export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
     export PKG_CONFIG_PATH=
 
-    # For the autotools packages only; meson takes all of this from the cross file.
     export CC=$TARGET-gcc CXX=$TARGET-g++ AR=$TARGET-ar RANLIB=$TARGET-ranlib
     export STRIP=$TARGET-strip WINDRES=$TARGET-windres NM=$TARGET-nm
-    # binutils stamps the PE header with the current time when strip rewrites the
-    # file, which is enough to change the sha256 of an otherwise identical build.
-    # With this and -Wl,--no-insert-timestamp in the cross file, two builds of the
-    # same versions.env produce a byte-identical DLL.
+    # strip otherwise stamps the PE header with the current time.
     export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0}
 
     export CFLAGS="-O2 -pipe -ffunction-sections -fdata-sections"
@@ -163,7 +146,6 @@ EOF
 build_zlib() {
     fetch_pkg zlib
 
-    # zlib's ./configure cannot cross-compile; win32/Makefile.gcc is the supported way.
     record zlib "make -f win32/Makefile.gcc PREFIX=$TARGET- libz.a"
     make -C "$S" -f win32/Makefile.gcc -j"$JOBS" PREFIX="$TARGET-" \
         CFLAGS="$CFLAGS -DNO_FSEEKO" libz.a
@@ -172,7 +154,6 @@ build_zlib() {
     install -Dm644 "$S/zconf.h" "$PREFIX/include/zconf.h"
     install -Dm644 "$S/libz.a"  "$PREFIX/lib/libz.a"
 
-    # That makefile installs no .pc file, but freetype/ffmpeg/mpv all look for one.
     sed -e "s|@prefix@|$PREFIX|g" \
         -e "s|@exec_prefix@|\${prefix}|g" \
         -e "s|@libdir@|\${exec_prefix}/lib|g" \
@@ -185,8 +166,7 @@ build_zlib() {
 build_freetype() {
     fetch_pkg freetype
 
-    # harfbuzz=no breaks the freetype<->harfbuzz cycle; harfbuzz is built against
-    # this freetype right after. png/brotli/bzip2 only matter for fonts we never load.
+    # harfbuzz=no breaks the freetype<->harfbuzz cycle.
     local opts=(
         --host="$TARGET" --prefix="$PREFIX"
         --enable-static --disable-shared
@@ -199,8 +179,6 @@ build_freetype() {
 build_harfbuzz() {
     fetch_pkg harfbuzz
 
-    # Only what libass calls (hb-ft shaping) is kept. directwrite/gdi would each add
-    # a system DLL import; subset/raster/vector/gpu are pure size for a shaping-only user.
     meson_build harfbuzz "$S" \
         --default-library=static \
         -Dfreetype=enabled \
@@ -224,12 +202,6 @@ build_fribidi() {
 build_libass() {
     fetch_pkg libass
 
-    # No font provider at all. fontconfig is a Unix thing, and DirectWrite -- which
-    # libass reaches via LoadLibraryW("Dwrite.dll"), so it is a runtime lookup rather
-    # than an import -- only matters for resolving font names, which a player that
-    # never renders a subtitle never does. Dropping both keeps the failure modes of a
-    # minimal Windows install out of the picture entirely, and libass allows it via
-    # --disable-require-system-font-provider.
     local opts=(
         --host="$TARGET" --prefix="$PREFIX"
         --enable-static --disable-shared
@@ -244,11 +216,7 @@ build_libplacebo() {
     fetch_pkg libplacebo
     local placebo=$S
 
-    # src/vulkan/stubs.c is compiled even with -Dvulkan=disabled, and libplacebo's
-    # public vulkan.h includes <vulkan/vulkan.h>. Supplying the headers upstream
-    # expects in 3rdparty/ is the honest fix; adding -I/usr/include to a cross build
-    # would not be. Headers only: nothing links against Vulkan, and verify.sh checks
-    # the finished DLL to prove no import came of it.
+    # Headers only: src/vulkan/stubs.c is compiled even with -Dvulkan=disabled.
     local vhfile vhdir
     vhfile=$(tarball_file vulkan-headers); vhdir=$(tarball_dir vulkan-headers)
     fetch "$(tarball_url vulkan-headers)" "$vhfile" "$VULKAN_HEADERS_SHA256"
@@ -258,17 +226,6 @@ build_libplacebo() {
     mv "$SRC/$vhdir" "$placebo/3rdparty/Vulkan-Headers"
     S=$placebo
 
-    # mpv links libplacebo unconditionally, so it cannot be dropped -- but with every
-    # GPU backend off it reduces to colorspace/tonemapping math that mpv never calls
-    # on an audio-only path. Turning off glslang/shaderc is the single biggest size win
-    # in the whole tree, and -Dvulkan=disabled here is half of why vulkan-1.dll is gone
-    # (the other half is mpv's own -Dvulkan=disabled).
-    #
-    # The release tarball ships empty 3rdparty/ submodule dirs, and that is still fine:
-    # glad and Vulkan-Headers are only read by the disabled backends, src/meson.build
-    # guards fast_float behind fs.is_dir(), and the jinja/markupsafe the GLSL
-    # preprocessor needs come from python3-jinja2 in docker/packages.txt.
-    # So: no git clone --recursive, and every source stays sha256-pinned.
     meson_build libplacebo "$S" \
         --default-library=static \
         -Dvulkan=disabled -Dvk-proc-addr=disabled \
@@ -279,16 +236,7 @@ build_libplacebo() {
         -Dunwind=disabled \
         -Ddemos=false -Dtests=false -Dbench=false -Dfuzz=false
 
-    # src/convert.cc calls std::to_chars/std::from_chars, but the installed .pc
-    # declares no C++ runtime at all -- it has no Libs.private line. mpv links
-    # libmpv-2.dll with the C driver, so without this the final link ends in four
-    # undefined std:: symbols. Appending to Libs puts -lstdc++ right after
-    # -lplacebo, which is the order static resolution needs. -static in the cross
-    # file keeps it libstdc++.a, and verify.sh asserts no libstdc++-6.dll import.
-    #
-    # It has to be the archive's absolute path, not -lstdc++: mingw ld searches
-    # libstdc++.dll.a before libstdc++.a, and -static does not change that, so
-    # -lstdc++ silently produces a libstdc++-6.dll import instead.
+    # libplacebo.pc omits its C++ runtime. Absolute path, because -lstdc++ picks the .dll.a.
     local pc=$PREFIX/lib/pkgconfig/libplacebo.pc libstdcxx
     libstdcxx=$("$TARGET-g++" -print-file-name=libstdc++.a)
     [ -f "$libstdcxx" ] || die "no static libstdc++.a in the toolchain ($libstdcxx)"
@@ -299,11 +247,6 @@ build_libplacebo() {
 build_ffmpeg() {
     fetch_pkg ffmpeg
 
-    # --disable-everything plus explicit whitelists. This is the one place tied to
-    # what a downstream consumer actually opens: every format it can encounter has to
-    # appear below, or it fails at runtime with a perfectly green build behind it.
-    # verify/ drives a wine playback matrix that fails loudly when an entry is
-    # missing, which is the only reliable way to converge these lists.
     local demuxers=(
         aac ac3 aiff ape asf au caf dsf dts eac3 flac hls image2 matroska mov mp3
         mpc mpc8 mpegts ogg rm spdif tak truehd tta voc w64 wav wv xwma
@@ -316,17 +259,14 @@ build_ffmpeg() {
         ralf shorten sipr speex tak truehd tta vorbis wavpack wmalossless wmapro
         wmav1 wmav2 wmavoice
         'pcm_*' 'adpcm_*' 'dsd_*'
-        # cover art embedded in tags, and standalone cover files next to the track
+        # cover art
         png mjpeg bmp
     )
     local parsers=(
         aac aac_latm ac3 cook dca dolby_e flac gsm mlp mpegaudio opus tak vorbis xma
         png mjpeg
     )
-    # abuffer/abuffersink -- what mpv's libavfilter bridge instantiates -- are NOT
-    # listed: they live in libavfilter's unconditional OBJS and have no CONFIG_ define
-    # at all, so naming them here would be a no-op that the cross-check below then
-    # reports as missing. verify.sh asserts their symbols in libavfilter.a instead.
+    # abuffer/abuffersink are always built and have no CONFIG_ define.
     local filters=(
         aformat aresample anull atrim asetpts asettb aselect
         atempo volume pan channelmap channelsplit join amerge amix adelay
@@ -335,8 +275,6 @@ build_ffmpeg() {
         anullsrc aevalsrc sine
         null format scale
     )
-    # No 'hls' protocol: HLS is a demuxer that runs over http/https. And there is no
-    # 'flac_header' bitstream filter in FFmpeg -- FLAC headers are the demuxer's job.
     local protocols=(
         file http https tcp tls crypto data pipe httpproxy async cache concat
     )
@@ -353,21 +291,16 @@ build_ffmpeg() {
 
         --disable-shared --enable-static --enable-pic
         --disable-programs --disable-doc --disable-debug
-        # No --disable-postproc: libpostproc was removed outright in FFmpeg 8.
         --disable-avdevice
 
-        # LGPL: no --enable-gpl, no --enable-nonfree.
         --disable-encoders --disable-muxers --disable-devices --disable-hwaccels
 
-        # No GPU/driver-backed path may exist; that is the entire point of this build.
         --disable-vaapi --disable-vdpau --disable-d3d11va --disable-d3d12va --disable-dxva2
         --disable-nvdec --disable-nvenc --disable-cuda-llvm --disable-amf
         --disable-mediafoundation --disable-vulkan
 
-        # Windows-native threads and TLS: keeps libwinpthread and OpenSSL/GnuTLS out.
         --enable-w32threads --enable-schannel --enable-network
 
-        # No host library may be picked up implicitly.
         --disable-autodetect --enable-zlib
 
         --disable-everything
@@ -381,9 +314,7 @@ build_ffmpeg() {
     record ffmpeg "./configure ${opts[*]}"
     ( cd "$S" && ./configure "${opts[@]}" )
 
-    # FFmpeg's configure silently ignores component names it does not recognise, so a
-    # typo above would drop a format and still produce a perfectly green build. Check
-    # every non-glob entry actually became a component before spending the compile.
+    # configure silently ignores unknown component names.
     missing=()
     check_components DEMUXER  "${demuxers[@]}"
     check_components DECODER  "${decoders[@]}"
@@ -400,11 +331,6 @@ build_ffmpeg() {
 build_mpv() {
     fetch_pkg mpv
 
-    # -Dvulkan=disabled is the fix this whole repository exists for.
-    # -Dgpl=false costs nothing here: the only gpl-gated features are
-    # cdda/dvbin/dvdnav/jack/oss-audio/caca/direct3d/x11, none on a Windows audio path.
-    # -Dwin32-smtc=disabled keeps the chain free of C++/WinRT.
-    # -Dbuild-date=false makes the output reproducible.
     meson_build mpv "$S" \
         --default-library=shared \
         -Dlibmpv=true -Dcplayer=false -Dtests=false -Dgpl=false -Dbuild-date=false \
@@ -442,9 +368,7 @@ do_package() {
     install -Dm755 "$dll" "$out/libmpv-2.dll"
     "$TARGET-strip" --strip-unneeded "$out/libmpv-2.dll"
 
-    # The archive mirrors shinchiro's mpv-dev layout so that a downstream already
-    # unpacking those needs no change beyond the URL. That means the import library
-    # has to keep that exact name even if meson picks another.
+    # Same layout and names as shinchiro's mpv-dev archives.
     local implib=$PREFIX/lib/libmpv.dll.a
     [ -f "$implib" ] || implib=$(find "$PREFIX/lib" -name 'libmpv*.dll.a' -print -quit)
     [ -n "$implib" ] && [ -f "$implib" ] || die "no libmpv import library found under $PREFIX/lib"
@@ -459,8 +383,6 @@ do_package() {
     write_buildinfo "$out/libmpv-2.dll" >"$out/BUILDINFO.txt"
 
     local sevenz; sevenz=$(command -v 7z || command -v 7zz) || die "no 7z/7zz on PATH"
-    # -mtm/-mtc/-mta=off: without them the archive stores mtimes, so the DLL can be
-    # byte-identical and the .7z still hash differently on every build.
     ( cd "$DIST" && rm -f "$name.7z" \
         && "$sevenz" a -mx=9 -mtm=off -mtc=off -mta=off -bso0 -bsp0 "$name.7z" "$name" >/dev/null )
     ( cd "$DIST" && sha256sum "$name.7z" >SHA256SUMS && cp "$name/BUILDINFO.txt" . )
@@ -470,18 +392,10 @@ do_package() {
     cat "$DIST/SHA256SUMS"
 }
 
-# install_licenses <dir> -- the licence text of everything linked into the DLL
-#
-# The DLL is redistributed on its own, away from this repository, and LGPL, ISC,
-# MIT, FTL and Zlib all require their text or notice to travel with the binary.
-# Texts are taken from the exact source trees that were compiled, so a version
-# bump can never ship last release's wording -- and `./build.sh package` against
-# sources that no longer match versions.env dies here instead of mislabelling.
+# install_licenses <dir> -- licence texts of everything linked into the DLL
 install_licenses() {
     local out=$1 e pkg f src
-    # GPL texts (mpv's LICENSE.GPL, FFmpeg's COPYING.GPL*, freetype's GPLv2.TXT) are
-    # left out on purpose: nothing here is built or licensed under them, and shipping
-    # them next to an LGPL DLL would only make the terms ambiguous.
+    # GPL texts left out on purpose: nothing here is built under them.
     for e in \
         mpv:LICENSE.LGPL mpv:Copyright \
         ffmpeg:COPYING.LGPLv2.1 ffmpeg:LICENSE.md \
@@ -498,9 +412,7 @@ install_licenses() {
         install -Dm644 "$src" "$out/$pkg/${f##*/}"
     done
 
-    # -static puts libgcc, libstdc++ and the mingw-w64 CRT inside the DLL as well.
-    # Their notices only exist as the distro's copyright files, so this is the one
-    # place packaging reads from outside build/ -- same files in ./dev.sh and CI.
+    # Statically linked toolchain runtimes.
     for e in \
         mingw-w64-runtime:mingw-w64-x86-64-dev \
         gcc-runtime:gcc-mingw-w64-x86-64-win32
@@ -513,13 +425,9 @@ install_licenses() {
 
 write_buildinfo() {
     local dll=$1 origin commit cdate
-    # Each of these can legitimately be absent (a fresh clone with no remote, an
-    # export with no .git); an empty substitution must not silently become a URL.
     origin=$(git -C "$ROOT" config --get remote.origin.url 2>/dev/null) || origin=
     commit=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null) || commit=
-    # The commit date, not the build clock: this file goes inside the archive, and a
-    # wall-clock timestamp here would be the one thing keeping two builds of the same
-    # commit from producing a byte-identical .7z.
+    # Commit date, not build time, to keep the archive reproducible.
     cdate=$(git -C "$ROOT" log -1 --format=%cI 2>/dev/null) || cdate=
 
     cat <<EOF
@@ -556,7 +464,6 @@ EOF
 
 # ------------------------------------------------------------------ main ---
 
-# Print the header comment block, whatever length it grows to.
 usage() { awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "$0"; }
 
 main() {
